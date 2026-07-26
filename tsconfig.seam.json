@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@hanzo/platform/templates": [
+        "../platform/pkg/platform/src/templates/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "test/conformance.ts",
+    "src/types.ts"
+  ]
+}

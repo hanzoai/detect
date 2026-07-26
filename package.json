@@ -1,0 +1,22 @@
+{
+  "name": "@hanzo/detect",
+  "version": "0.1.0",
+  "description": "Derive a repo's platform CI/CD config from the repo. Zero runtime dependencies.",
+  "type": "module",
+  "license": "BSD-3-Clause",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "audit": "node bin/audit.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.3",
+    "yaml": "^2.8.1"
+  }
+}

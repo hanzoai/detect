@@ -1,0 +1,238 @@
+{
+	"hanzoai/app": {
+		"org": "hanzoai",
+		"repo": "app",
+		"files": {
+			"Dockerfile": "FROM node:22-alpine AS base\nFROM base AS deps\nRUN apk add --no-cache libc6-compat\nWORKDIR /app\nCOPY package.json pnpm-lock.yaml* ./\nRUN corepack enable pnpm && pnpm i --no-frozen-lockfile\nFROM base AS builder\nWORKDIR /app\nCOPY --from=deps /app/node_modules ./node_modules\nCOPY . .\nARG NEXT_PUBLIC_APP_URL=https://hanzo.app\nARG NEXT_PUBLIC_IAM_CLIENT_ID\nARG IAM_ENDPOINT=https://hanzo.id\nARG IAM_ORGANIZATION=hanzo\nARG IAM_APPLICATION=app-hanzo\nRUN corepack enable pnpm && pnpm build\nFROM base AS runner\nWORKDIR /app\nRUN addgroup --system --gid 1001 nodejs\nRUN adduser --system --uid 1001 nextjs\nCOPY --from=builder /app/public ./public\nCOPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./\nCOPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static\nCMD [\"node\", \"server.js\"]",
+			"Dockerfile.production": "FROM node:20-alpine AS builder\nRUN corepack enable && corepack prepare pnpm@10.17.1 --activate\nRUN apk add --no-cache libc6-compat python3 make g++\nWORKDIR /app\nCOPY package.json pnpm-lock.yaml* ./\nRUN pnpm install --no-frozen-lockfile\nCOPY . .\nRUN CI=false pnpm run build && \\\nRUN set -eux; \\\nFROM node:20-alpine AS runner\nRUN apk add --no-cache libc6-compat\nWORKDIR /app\nCOPY --from=builder /app/.next/standalone ./\nCOPY --from=builder /app/.next/static ./.next/static\nCOPY --from=builder /app/public ./public\n    CMD node -e \"require('http').get('http://localhost:3000/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); })\" || exit 1\nCMD [\"node\", \"server.js\"]",
+			"docker/Dockerfile": "FROM node:20-alpine\nRUN corepack enable && corepack prepare pnpm@10.17.1 --activate\nRUN apk add --no-cache libc6-compat\nWORKDIR /app\nCOPY package.json pnpm-lock.yaml* ./\nRUN pnpm install --frozen-lockfile\nCOPY . .\nRUN pnpm run build && \\\nRUN pnpm prune --prod\n    CMD node -e \"require('http').get('http://localhost:3000/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => { process.exit(1); })\" || exit 1\nCMD [\"pnpm\", \"start\"]",
+			"docker/Dockerfile.dev": "FROM node:20-alpine\nRUN corepack enable && corepack prepare pnpm@9.14.4 --activate\nRUN apk add --no-cache libc6-compat\nWORKDIR /app\nCOPY package.json pnpm-lock.yaml* ./\nRUN pnpm install --frozen-lockfile\nCOPY . .\nCMD [\"pnpm\", \"dev\"]",
+			"package.json": "{\n  \"name\": \"@hanzo/app\",\n  \"version\": \"1.42.121\",\n  \"private\": true,\n  \"license\": \"MIT\",\n  \"scripts\": {\n    \"predev\": \"node scripts/gen-edit-manifest.mjs\",\n    \"dev\": \"next dev --webpack\",\n    \"gen:edit-manifest\": \"node scripts/gen-edit-manifest.mjs\",\n    \"prebuild\": \"node scripts/gen-edit-manifest.mjs\",\n    \"build\": \"next build --webpack\",\n    \"start\": \"next start\",\n    \"lint\": \"next lint\",\n    "
+		}
+	},
+	"hanzoai/cloud": {
+		"org": "hanzoai",
+		"repo": "cloud",
+		"files": {
+			"Dockerfile": "ARG CONSOLE_IMAGE=ghcr.io/hanzoai/console-embed:latest\nARG SKILLS_IMAGE=ghcr.io/hanzoai/agent-skills:latest\nARG FLAGS_IMAGE=ghcr.io/hanzoai/cloud-flags:latest\nFROM ${CONSOLE_IMAGE} AS console\nFROM ${SKILLS_IMAGE} AS skills\nFROM ${FLAGS_IMAGE} AS flagslib\nFROM ghcr.io/hanzoai/mirror/golang:1.26-alpine3.22@sha256:47d47cb5cc3c7dac409dcb6c3a98a6263571218046cd02d709527feef804a77c AS build\nRUN apk add --no-cache ca-certificates tzdata git gcc musl-dev sqlcipher-dev=4.6.1-r0 pkgconfig binutils\nRUN addgroup -g 65532 -S nonroot && adduser -u 65532 -S nonroot -G nonroot\nRUN set -eux; \\\nWORKDIR /src\nCOPY go.mod go.sum ./\nRUN --mount=type=secret,id=GIT_AUTH_TOKEN \\\nCOPY . .\nCOPY --from=console /dist/ /src/webui/dist/\nCOPY --from=skills /catalog/ /src/clients/agentskills/catalog/\nCOPY --from=flagslib /libhanzo_flags.a /src/native/flags/target/release/libhanzo_flags.a\nRUN --mount=type=cache,id=cloud-gomod-v4,target=/go/pkg/mod,sharing=locked \\\nRUN --mount=type=cache,id=cloud-gomod-v4,target=/go/pkg/mod,sharing=locked \\\nRUN --mount=type=cache,id=cloud-gomod-v4,target=/go/pkg/mod,sharing=locked \\\nRUN --mount=type=cache,id=cloud-gomod-v4,target=/go/pkg/mod,sharing=locked \\\nRUN --mount=type=cache,id=cloud-gomod-v4,target=/go/pkg/mod,sharing=locked \\\nRUN readelf -d /cloud | grep -qE 'NEEDED.*(sqlcipher|sqlite3)' || { echo \"FATAL: /cloud links no sqlite/sqlcipher .so\"; exit 1; }; \\\nFROM ghcr.io/hanzoai/mirror/alpine:3.22@sha256:7c8cb692ae09657cbc4a3f3cbd0e8d5a2690ba38386aaaf252dbb060bf5eb2e6\nARG REVISION=unknown\nRUN apk add --no-cache ca-certificates tzdata sqlcipher-libs git libgcc \\\nCOPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt\nCOPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo\nCOPY --from=build /etc/passwd /etc/passwd\nCOPY --from=build /etc/group /etc/group\nCOPY --from=build /cloud /cloud\nCOPY --from=build /smoke /smoke\nENTRYPOINT [\"/cloud\"]",
+			"native/flags/Dockerfile": "FROM public.ecr.aws/docker/library/rust:1-alpine3.22@sha256:b348cb409ac0a73de15065997a360063cf87465574a15e3e4469862cb8996f02 AS build\nRUN apk add --no-cache musl-dev\nWORKDIR /src\nCOPY Cargo.toml Cargo.lock ./\nCOPY src ./src\nRUN cargo build --release --locked\nFROM scratch\nCOPY --from=build /src/target/release/libhanzo_flags.a /libhanzo_flags.a",
+			"native/flags/Cargo.toml": "",
+			"go.mod": ""
+		}
+	},
+	"hanzoai/commerce": {
+		"org": "hanzoai",
+		"repo": "commerce",
+		"files": {
+			"Dockerfile": "FROM busybox AS admin-build\nCOPY app/admin/out /web/admin/out\nFROM node:22-alpine AS pay-build\nARG PAY_REPO=https://github.com/hanzoai/pay.git\nARG PAY_VERSION=v0.1.2\nWORKDIR /pay\nRUN apk add --no-cache git && corepack enable pnpm\nRUN --mount=type=secret,id=netrc,target=/root/.netrc \\\nRUN pnpm install --frozen-lockfile && pnpm build\nFROM node:22-alpine AS billing-build\nARG BILLING_REPO=https://github.com/hanzoai/billing.git\nARG BILLING_VERSION=v0.1.2\nWORKDIR /billing\nRUN apk add --no-cache git python3 make g++ && corepack enable && corepack prepare pnpm@9.15.4 --activate\nRUN --mount=type=secret,id=netrc,target=/root/.netrc \\\nRUN pnpm install --frozen-lockfile && pnpm build\nFROM golang:1.26.4-alpine AS builder\nRUN apk add --no-cache git ca-certificates tzdata gcc musl-dev\nARG TARGETARCH\nWORKDIR /build\nCOPY go.mod go.sum ./\nRUN --mount=type=cache,target=/go/pkg/mod \\\nCOPY . .\nARG PLANS_VERSION=1.1.4\nRUN apk add --no-cache curl && sh scripts/fetch-plans.sh\nRUN rm -rf admin/dist\nCOPY --from=admin-build /web/admin/out admin/dist\nRUN rm -rf checkout/ui/dist && mkdir -p checkout/ui/dist\nCOPY --from=pay-build /pay/dist/ checkout/ui/dist/\nRUN rm -rf billing/ui/dist && mkdir -p billing/ui/dist\nCOPY --from=billing-build /billing/out/ billing/ui/dist/\nARG VERSION=\"\"\nRUN --mount=type=cache,target=/go/pkg/mod \\\nFROM alpine:3.21\nRUN apk add --no-cache ca-certificates tzdata curl\nRUN addgroup -S hanzo && adduser -S hanzo -G hanzo\nWORKDIR /app\nCOPY --from=builder /build/commerce /app/commerce\nCOPY --from=builder /build/templates /app/templates\nCOPY --from=builder /build/api/templates /app/api/templates\nRUN mkdir -p /app/data /app/logs && \\\n    CMD curl -f http://localhost:8001/healthz || exit 1\nENTRYPOINT [\"/app/commerce\"]\nCMD [\"--http\", \"0.0.0.0:8001\"]",
+			"Dockerfile.admin": "FROM ghcr.io/hanzoai/commerce-admin:0.0.1",
+			"Dockerfile.commerce-admin": "FROM node:20-slim AS builder\nRUN npm install -g pnpm@9.15.9\nWORKDIR /build\nCOPY app/ ./app/\nWORKDIR /build/app\nRUN pnpm install --frozen-lockfile\nRUN node_modules/.bin/turbo run build --filter=@hanzo/commerce-dashboard\nFROM busybox:1.36 AS arrange\nCOPY --from=builder /build/app/admin/out /srv\nFROM ghcr.io/hanzoai/static:v0.5.1\nCOPY --from=arrange /srv /srv\nENTRYPOINT [\"/static\", \"--root=/srv\", \"--spa\", \"--port=3000\"]",
+			"Dockerfile.prebuilt": "FROM alpine:3.21\nRUN apk add --no-cache ca-certificates tzdata curl\nRUN addgroup -S hanzo && adduser -S hanzo -G hanzo\nWORKDIR /app\nCOPY commerce /app/commerce\nCOPY templates /app/templates\nCOPY api/templates /app/api/templates\nRUN mkdir -p /app/data /app/logs && \\\n    CMD curl -f http://localhost:8001/healthz || exit 1\nENTRYPOINT [\"/app/commerce\"]\nCMD [\"serve\", \"0.0.0.0:8001\"]",
+			"Dockerfile.production": "FROM golang:1.26.4-alpine AS builder\nRUN apk add --no-cache git ca-certificates tzdata gcc musl-dev curl\nWORKDIR /build\nCOPY . .\nRUN --mount=type=secret,id=gh_token \\\nRUN sh scripts/fetch-plans.sh\nRUN CGO_ENABLED=0 go build \\\nFROM alpine:3.19\nRUN apk add --no-cache ca-certificates tzdata curl wget\nRUN addgroup -S hanzo && adduser -S hanzo -G hanzo\nWORKDIR /app\nCOPY --from=builder /build/commerce /app/commerce\nCOPY --from=builder /build/templates /app/templates\nCOPY --from=builder /build/api/templates /app/api/templates\nRUN mkdir -p /app/data /app/logs && \\\n    CMD wget -q --spider http://localhost:8000/healthz || exit 1\nENTRYPOINT [\"/app/commerce\"]\nCMD [\"serve\", \"0.0.0.0:8000\"]",
+			"Dockerfile.site": "FROM ghcr.io/hanzoai/commerce-site:0.0.1 AS content\nFROM ghcr.io/hanzoai/static:v0.5.1\nCOPY --from=content /usr/share/nginx/html /srv\nENTRYPOINT [\"/static\", \"--root=/srv\", \"--spa\", \"--port=3000\"]",
+			"Dockerfile.sqfix": "FROM golang:1.26-alpine AS builder\nRUN apk add --no-cache git ca-certificates tzdata gcc musl-dev curl\nARG TARGETARCH\nWORKDIR /build\nCOPY go.mod go.sum ./\nRUN --mount=type=secret,id=gh_token \\\nCOPY . .\nRUN sh scripts/fetch-plans.sh\nARG GO_EXPERIMENT=jsonv2\nARG VERSION=\"\"\nRUN --mount=type=secret,id=gh_token \\\nFROM alpine:3.21\nRUN apk add --no-cache ca-certificates tzdata curl\nRUN addgroup -S hanzo && adduser -S hanzo -G hanzo\nWORKDIR /app\nCOPY --from=builder /build/commerce /app/commerce\nCOPY --from=builder /build/templates /app/templates\nCOPY --from=builder /build/api/templates /app/api/templates\nRUN mkdir -p /app/data /app/logs && \\\n    CMD curl -f http://localhost:8001/healthz || exit 1\nENTRYPOINT [\"/app/commerce\"]\nCMD [\"--http\", \"0.0.0.0:8001\"]",
+			"Dockerfile.sqfix-prebuilt": "FROM alpine:3.21\nRUN apk add --no-cache ca-certificates tzdata curl\nRUN addgroup -S hanzo && adduser -S hanzo -G hanzo\nWORKDIR /app\nCOPY commerce.amd64 /app/commerce\nCOPY templates /app/templates\nCOPY api/templates /app/api/templates\nRUN chmod +x /app/commerce && \\\n    CMD curl -f http://localhost:8001/healthz || exit 1\nENTRYPOINT [\"/app/commerce\"]\nCMD [\"--http\", \"0.0.0.0:8001\"]",
+			"Dockerfile.store": "FROM node:20-alpine AS base\nRUN corepack enable && corepack prepare pnpm@10.8.0 --activate\nWORKDIR /app\nFROM base AS builder\nCOPY app/ ./\nRUN pnpm install --frozen-lockfile\nRUN pnpm turbo run build --filter=hanzo-commerce-storefront\nFROM base AS runner\nWORKDIR /app\nCOPY --from=builder /app/store/.next/standalone ./\nCOPY --from=builder /app/store/.next/node_modules ./.next/node_modules\nCOPY --from=builder /app/store/.next/static ./.next/static\nCOPY --from=builder /app/store/public ./public\nCMD [\"node\", \"server.js\"]",
+			"app/admin/Dockerfile": "FROM node:22-alpine AS base\nFROM base AS deps\nRUN apk add --no-cache libc6-compat\nWORKDIR /app\nCOPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\nCOPY admin/package.json admin/\nCOPY packages/ packages/\nRUN corepack enable pnpm && pnpm install --frozen-lockfile\nFROM base AS builder\nWORKDIR /app\nARG NEXT_PUBLIC_GATEWAY_KEY=\"\"\nCOPY --from=deps /app/ ./\nCOPY admin/ admin/\nCOPY packages/ packages/\nWORKDIR /app/admin\nRUN corepack enable pnpm && pnpm build\nFROM base AS runner\nRUN addgroup --system --gid 1001 nextjs && \\\nWORKDIR /app/admin\nCOPY --from=builder --chown=nextjs:nextjs /app/admin/.next/standalone/ /app/\nCOPY --from=builder --chown=nextjs:nextjs /app/admin/.next/static ./.next/static\nCMD [\"node\", \"server.js\"]",
+			"app/admin/package.json": "",
+			"deploy/Dockerfile": "FROM golang:1.26-alpine AS builder\nARG VERSION=2.0.0\nARG BUILD_TIME\nARG GIT_COMMIT\nRUN apk add --no-cache \\\nWORKDIR /build\nCOPY go.mod go.sum ./\nRUN go mod download && go mod verify\nCOPY . .\nRUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build \\\nRUN CGO_ENABLED=0 go build \\\nFROM alpine:3.20\nRUN apk add --no-cache \\\nRUN addgroup -g 1000 -S hanzo && \\\nWORKDIR /app\nCOPY --from=builder /build/commerce /app/commerce\nCOPY --from=builder /build/healthcheck /app/healthcheck\nCOPY --from=builder /build/templates /app/templates\nCOPY --from=builder /build/analytics/templates /app/analytics/templates 2>/dev/null || true\nCOPY --from=builder /build/api/templates /app/api/templates 2>/dev/null || true\nRUN mkdir -p /app/data /app/logs /app/tmp && \\\n    CMD /app/healthcheck || curl -sf http://localhost:${PORT}/healthz || exit 1\nENTRYPOINT [\"/sbin/tini\", \"--\"]\nCMD [\"/app/commerce\", \"serve\", \"0.0.0.0:8001\"]",
+			"metering/proxy/Dockerfile": "FROM golang:1.24-alpine AS build\nWORKDIR /src/metering\nCOPY go.mod ./\nCOPY *.go ./\nCOPY proxy/ ./proxy/\nWORKDIR /src/metering/proxy\nARG TARGETARCH\nRUN GOARCH=${TARGETARCH:-amd64} go build -trimpath -ldflags=\"-s -w\" \\\nFROM scratch\nCOPY --from=build /out/meter-proxy /meter-proxy\nENTRYPOINT [\"/meter-proxy\"]",
+			"metering/proxy/go.mod": "",
+			"go.mod": ""
+		}
+	},
+	"hanzoai/console": {
+		"org": "hanzoai",
+		"repo": "console",
+		"files": {
+			"Dockerfile": "FROM public.ecr.aws/docker/library/node:24-alpine AS build\nWORKDIR /app\nARG SOURCE_COMMIT=\"\"\nCOPY . .\nRUN mkdir -p public\nRUN npm install --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-timeout=120000\nRUN npm run build\nFROM public.ecr.aws/docker/library/node:24-alpine AS runner\nWORKDIR /app\nRUN addgroup -S app && adduser -S app -G app\nCOPY --from=build /app/.next ./.next\nCOPY --from=build /app/public ./public\nCOPY --from=build /app/node_modules ./node_modules\nCOPY --from=build /app/package.json ./package.json\nCOPY --from=build /app/next.config.mjs ./next.config.mjs\nCOPY --from=build /app/src/config/build-id.mjs ./src/config/build-id.mjs\nCMD [\"node\", \"node_modules/next/dist/bin/next\", \"start\", \"-p\", \"4000\"]",
+			"Dockerfile.embed": "FROM public.ecr.aws/docker/library/node:24-alpine AS build\nRUN apk add --no-cache git\nWORKDIR /console\nARG NEXT_PUBLIC_ANALYTICS_WEBSITE_ID=7dce54ee-41f6-4751-96bf-fe005067c7c7\nCOPY . .\nRUN npm install --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-timeout=120000\nRUN npm run build:embed && [ -s out/index.html ] && [ -d out/_next ] \\\nFROM scratch\nCOPY --from=build /console/out/ /dist/",
+			"package.json": "{\n  \"name\": \"@hanzo/console\",\n  \"version\": \"8.5.26\",\n  \"private\": true,\n  \"license\": \"BSD-3-Clause\",\n  \"author\": \"Hanzo AI <dev@hanzo.ai>\",\n  \"description\": \"Hanzo Cloud Console — unified admin console for Hanzo Cloud and all cloud products.\",\n  \"scripts\": {\n    \"dev\": \"next dev -p 4000\",\n    \"build\": \"next build\",\n    \"build:embed\": \"node scripts/build-embed.mjs\",\n    \"start\": \"next start -p 4000",
+			"e2e/admin-catalog-editor.spec.ts": "",
+			"e2e/admin-plans-editor.spec.ts": "",
+			"e2e/admin-views-audit.spec.ts": "",
+			"e2e/ai-economics.spec.ts": "",
+			"e2e/billing-isolation.spec.ts": "",
+			"e2e/billing-usage-o11y.spec.ts": "",
+			"e2e/blank-audit.spec.ts": "",
+			"e2e/budgets-responsive.spec.ts": "",
+			"e2e/cd-canvas-map.spec.ts": "",
+			"e2e/chrome-brand-voice.spec.ts": "",
+			"e2e/console.spec.ts": "",
+			"e2e/credit-maxpower.spec.ts": "",
+			"e2e/deeplink-refresh.spec.ts": "",
+			"e2e/entitlement-sidebar.spec.ts": "",
+			"e2e/gpus-connect.spec.ts": "",
+			"e2e/gpus-responsive.spec.ts": "",
+			"e2e/insights-o11y.spec.ts": "",
+			"e2e/interactive-training.spec.ts": "",
+			"e2e/live-billing-admin.spec.ts": "",
+			"e2e/models-surfaces.spec.ts": "",
+			"e2e/open-edition.spec.ts": "",
+			"e2e/pages.spec.ts": "",
+			"e2e/platform-store.spec.ts": "",
+			"e2e/polish-qa.spec.ts": "",
+			"e2e/probe-o11y.spec.ts": "",
+			"e2e/provider-billing.spec.ts": "",
+			"e2e/router-config.spec.ts": "",
+			"e2e/signin-direct.spec.ts": "",
+			"e2e/storage-fleet.spec.ts": "",
+			"e2e/webhooks.spec.ts": "",
+			"e2e/workbench.spec.ts": ""
+		}
+	},
+	"hanzoai/git": {
+		"org": "hanzoai",
+		"repo": "git",
+		"files": {
+			"Dockerfile": "FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26-alpine3.24 AS frontend-build\nRUN apk --no-cache add build-base git nodejs pnpm\nWORKDIR /src\nCOPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\nRUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile\nCOPY --exclude=.git/ . .\nRUN make frontend\nFROM docker.io/library/golang:1.26-alpine3.24 AS build-env\nARG GIT_VERSION\nARG TAGS=\"\"\nARG CGO_EXTRA_CFLAGS\nRUN apk --no-cache add \\\nWORKDIR ${GOPATH}/src/gitea.dev\nCOPY go.mod go.sum ./\nRUN --mount=type=secret,id=gh_token \\\nCOPY --exclude=.git/ . .\nCOPY --from=frontend-build /src/public/assets public/assets\nRUN --mount=type=cache,target=\"/root/.cache/go-build\" \\\nCOPY docker/root /tmp/local\nRUN chmod 755 /tmp/local/usr/bin/entrypoint \\\nFROM docker.io/library/alpine:3.24 AS gitea\nRUN apk --no-cache add \\\nRUN addgroup \\\nCOPY --from=build-env /tmp/local /\nCOPY --from=build-env /go/src/gitea.dev/gitea /app/gitea/gitea\nENTRYPOINT [\"/usr/bin/entrypoint\"]\nCMD [\"/usr/bin/s6-svscan\", \"/etc/s6\"]",
+			"Dockerfile.rootless": "FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26-alpine3.24 AS frontend-build\nRUN apk --no-cache add build-base git nodejs pnpm\nWORKDIR /src\nCOPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./\nRUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile\nCOPY --exclude=.git/ . .\nRUN make frontend\nFROM docker.io/library/golang:1.26-alpine3.24 AS build-env\nARG GIT_VERSION\nARG TAGS=\"\"\nARG CGO_EXTRA_CFLAGS\nRUN apk --no-cache add \\\nWORKDIR ${GOPATH}/src/gitea.dev\nCOPY go.mod go.sum ./\nRUN --mount=type=secret,id=GIT_AUTH_TOKEN \\\nCOPY --exclude=.git/ . .\nCOPY --from=frontend-build /src/public/assets public/assets\nRUN --mount=type=cache,target=\"/root/.cache/go-build\" \\\nCOPY docker/rootless /tmp/local\nRUN chmod 755 /tmp/local/usr/local/bin/* \\\nFROM docker.io/library/alpine:3.24 AS gitea-rootless\nRUN apk --no-cache add \\\nRUN addgroup \\\nRUN mkdir -p /var/lib/gitea /etc/gitea\nRUN chown git:git /var/lib/gitea /etc/gitea\nCOPY --from=build-env /tmp/local /\nCOPY --from=build-env --chown=root:root /go/src/gitea.dev/gitea /app/gitea/gitea\nWORKDIR /var/lib/gitea\nENTRYPOINT [\"/usr/bin/dumb-init\", \"--\", \"/usr/local/bin/docker-entrypoint.sh\"]\nCMD []",
+			"go.mod": "",
+			"package.json": "{\n  \"type\": \"module\",\n  \"packageManager\": \"pnpm@11.10.0\",\n  \"engines\": {\n    \"node\": \">= 22.18.0\",\n    \"pnpm\": \">= 11.0.0\"\n  },\n  \"dependencies\": {\n    \"@citation-js/core\": \"0.7.21\",\n    \"@citation-js/plugin-bibtex\": \"0.7.21\",\n    \"@citation-js/plugin-csl\": \"0.7.22\",\n    \"@citation-js/plugin-software-formats\": \"0.6.2\",\n    \"@codemirror/autocomplete\": \"6.20.3\",\n    \"@codemirror/commands\": \"6.10.4\",",
+			"pyproject.toml": "[project]\nname = \"gitea\"\nversion = \"0.0.0\"\nrequires-python = \">=3.10\"\n\n[dependency-groups]\ndev = [\n  \"djlint==1.40.4\",\n  \"yamllint==1.38.0\",\n  \"zizmor==1.26.1\",\n]\n\n[tool.djlint]\nprofile=\"golang\"\nignore=\"H005,H006,H013,H016,H020,H021,H030,H031\"\n"
+		}
+	},
+	"hanzoai/hanzo.ai": {
+		"org": "hanzoai",
+		"repo": "hanzo.ai",
+		"files": {
+			"Dockerfile.production": "FROM node:20-bookworm-slim AS build\nWORKDIR /app\nRUN corepack enable && corepack prepare pnpm@10.33.4 --activate\nCOPY package.json pnpm-lock.yaml ./\nRUN pnpm install --frozen-lockfile\nCOPY . .\nRUN NODE_OPTIONS=--max-old-space-size=8192 pnpm build\nRUN cp out/cloud.html out/index.html\nRUN cd out && for f in $(find . -type f -name '*.html' ! -name 'index.html' ! -name '404.html'); do \\\nFROM ghcr.io/hanzoai/static:v0.5.1\nCOPY --from=build /app/out /srv\nENTRYPOINT [\"/static\"]\nCMD [\"--root=/srv\", \"--spa\", \"--port=3000\"]",
+			"package.json": "{\n  \"name\": \"@hanzo/site\",\n  \"private\": true,\n  \"version\": \"0.2.4\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"dev\": \"next dev\",\n    \"build\": \"next build\",\n    \"start\": \"next start\",\n    \"lint\": \"next lint\",\n    \"test\": \"playwright test\",\n    \"test:ui\": \"playwright test --ui\",\n    \"test:headed\": \"playwright test --headed\",\n    \"test:report\": \"playwright show-report\"\n  },\n  \"dependencies\": {\n    \"@han",
+			"e2e/auth.spec.ts": "",
+			"e2e/billing.spec.ts": "",
+			"e2e/dashboard.spec.ts": "",
+			"e2e/live-site.spec.ts": "",
+			"e2e/mega-menu.spec.ts": "",
+			"e2e/products-audit.spec.ts": "",
+			"e2e/products.spec.ts": ""
+		}
+	},
+	"hanzoai/otel-collector": {
+		"org": "hanzoai",
+		"repo": "otel-collector",
+		"files": {
+			"cmd/o11yotelcollector/Dockerfile": "FROM debian:bookworm-slim\nRUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*\nARG TARGETOS TARGETARCH\nARG USER_UID=10001\nCOPY .build/${TARGETOS}-${TARGETARCH}/hanzo-otel-collector /hanzo-otel-collector\nCOPY conf/default.yaml /etc/otel/config.yaml\nENTRYPOINT [ \"/hanzo-otel-collector\" ]\nCMD [\"--config\", \"/etc/otel/config.yaml\"]",
+			"cmd/o11yotelcollector/Dockerfile.multi-arch": "ARG DEBIAN_SHA=\"pass-a-valid-docker-sha-otherwise-this-will-fail\"\nFROM debian@sha256:${DEBIAN_SHA}\nARG OS=\"linux\"\nARG ARCH\nARG USER_UID=10001\nRUN apt-get update && \\\nCOPY ./target/${OS}-${ARCH}/hanzo-otel-collector /hanzo-otel-collector\nCOPY conf/default.yaml /etc/otel/config.yaml\nENTRYPOINT [ \"/hanzo-otel-collector\" ]\nCMD [\"--config\", \"/etc/otel/config.yaml\"]",
+			"cmd/o11yotelcollector/Dockerfile.selfbuild": "FROM golang:1.26-bookworm AS build\nWORKDIR /src\nCOPY go.mod go.sum ./\nRUN go mod download\nCOPY . .\nARG TARGETOS=linux\nARG TARGETARCH=amd64\nRUN CGO_ENABLED=0 go test ./receiver/zapreceiver/... ./exporter/zapexporter/...\nRUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \\\nFROM debian:bookworm-slim\nRUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*\nARG USER_UID=10001\nCOPY --from=build /out/hanzo-otel-collector /hanzo-otel-collector\nCOPY conf/default.yaml /etc/otel/config.yaml\nENTRYPOINT [ \"/hanzo-otel-collector\" ]\nCMD [\"--config\", \"/etc/otel/config.yaml\"]",
+			"cmd/o11yschemamigrator/Dockerfile": "FROM debian:bookworm-slim\nARG TARGETOS TARGETARCH\nARG USER_UID=10001\nCOPY .build/${TARGETOS}-${TARGETARCH}/o11y-schema-migrator /o11y-schema-migrator\nENTRYPOINT [ \"/o11y-schema-migrator\" ]\nCMD [\"--dsn\", \"tcp://localhost:9000\"]",
+			"cmd/o11yschemamigrator/Dockerfile.multi-arch": "ARG DEBIAN_SHA=\"pass-a-valid-docker-sha-otherwise-this-will-fail\"\nFROM debian@sha256:${DEBIAN_SHA}\nARG OS=\"linux\"\nARG ARCH\nARG USER_UID=10001\nRUN apt-get update && \\\nCOPY ./target/${OS}-${ARCH}/o11y-schema-migrator /o11y-schema-migrator\nENTRYPOINT [ \"/o11y-schema-migrator\" ]\nCMD [\"--dsn\", \"tcp://localhost:9000\"]",
+			"cmd/o11yschemamigrator/Dockerfile.selfbuild": "FROM golang:1.26-bookworm AS build\nWORKDIR /src\nCOPY go.mod go.sum ./\nRUN go mod download\nCOPY . .\nARG TARGETOS=linux\nARG TARGETARCH=amd64\nRUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \\\nFROM debian:bookworm-slim\nRUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*\nARG USER_UID=10001\nCOPY --from=build /out/o11y-schema-migrator /o11y-schema-migrator\nENTRYPOINT [ \"/o11y-schema-migrator\" ]\nCMD [\"--dsn\", \"tcp://localhost:9000\"]",
+			"go.mod": ""
+		}
+	},
+	"hanzoai/pricing": {
+		"org": "hanzoai",
+		"repo": "pricing",
+		"files": {
+			"Dockerfile": "FROM ghcr.io/hanzoai/nodejs:v24.18.0\nWORKDIR /app\nCOPY package.json package-lock.json ./\nRUN npm ci --production --ignore-scripts\nCOPY src ./src\nCOPY data ./data\nCOPY datastore.json ./datastore.json\nCOPY plans-extra ./plans-extra\nCMD [\"node\", \"src/server.mjs\"]",
+			"go.mod": "",
+			"package.json": "{\n  \"name\": \"@hanzo/pricing\",\n  \"version\": \"1.1.0\",\n  \"type\": \"module\",\n  \"private\": true,\n  \"scripts\": {\n    \"start\": \"node src/server.mjs\",\n    \"sync\": \"node src/sync.mjs\",\n    \"dev\": \"node --watch src/server.mjs\",\n    \"test\": \"node test/bundle.test.mjs\"\n  },\n  \"dependencies\": {\n    \"@hanzo/plans\": \"^1.1.1\",\n    \"express\": \"^4.21.0\"\n  }\n}\n"
+		}
+	},
+	"hanzoai/studio": {
+		"org": "hanzoai",
+		"repo": "studio",
+		"files": {
+			"Dockerfile": "FROM python:3.11-slim AS base\nRUN apt-get update && apt-get install -y --no-install-recommends \\\nWORKDIR /app\nRUN pip install --no-cache-dir \\\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\nCOPY branding/ /tmp/branding/\nRUN chmod +x /tmp/branding/apply-branding.sh && /tmp/branding/apply-branding.sh && rm -rf /tmp/branding\nCOPY . .\nRUN chmod +x scripts/install_custom_nodes.sh && scripts/install_custom_nodes.sh\nRUN mkdir -p models output input custom_nodes user\nRUN printf '%s\\n' \\\nCMD [\"python\", \"main.py\", \"--listen\", \"0.0.0.0\", \"--port\", \"8188\", \"--cpu\"]",
+			"pyproject.toml": "[project]\nname = \"hanzo-studio\"\nversion = \"0.18.2\"\nreadme = \"README.md\"\nlicense = { file = \"LICENSE\" }\nrequires-python = \">=3.10\"\n\n[project.urls]\nhomepage = \"https://hanzo.ai\"\nrepository = \"https://github.com/hanzoai/studio\"\ndocumentation = \"https://docs.hanzo.ai\"\n\n[tool.ruff]\nlint.select = [\n  \"N805\", # invalid-first-argument-name-for-method\n  \"S307\", # suspicious-eval-usage\n  \"S102\", # exec\n  \"E",
+			"requirements.txt": ""
+		}
+	},
+	"hanzoai/tasks": {
+		"org": "hanzoai",
+		"repo": "tasks",
+		"files": {
+			"Dockerfile": "FROM golang:1.26.4-alpine AS go-build\nRUN apk add --no-cache git\nWORKDIR /src\nCOPY go.mod go.sum ./\nRUN --mount=type=secret,id=gh_token --mount=type=secret,id=GIT_AUTH_TOKEN \\\nCOPY . .\nRUN test -f ui/dist/index.html || (echo \"ui/dist missing — run scripts/sync-admin-ui.sh before docker build\" >&2 && exit 1)\nARG GO_EXPERIMENT=jsonv2\nRUN CGO_ENABLED=0 go build -trimpath -ldflags=\"-s -w\" -o /tasksd ./cmd/tasksd\nFROM alpine:3.21\nRUN apk add --no-cache ca-certificates && mkdir -p /data\nCOPY --from=go-build /tasksd /usr/local/bin/tasksd\nENTRYPOINT [\"tasksd\"]\nCMD [\"--zap-port\", \"9999\", \"--http\", \":7243\", \"--data\", \"/data\"]",
+			"go.mod": ""
+		}
+	},
+	"hanzoai/world": {
+		"org": "hanzoai",
+		"repo": "world",
+		"files": {
+			"Dockerfile": "FROM node:20-bookworm-slim AS web\nWORKDIR /app\nCOPY package.json package-lock.json ./\nRUN npm ci\nCOPY . .\nARG VITE_MAPBOX_TOKEN\nRUN npm run build\nRUN npm run build:react\nFROM golang:1.26-alpine AS gobuild\nWORKDIR /src\nRUN apk add --no-cache git\nCOPY go.mod go.sum ./\nRUN --mount=type=secret,id=gh_token \\\nCOPY cmd ./cmd\nCOPY internal ./internal\nRUN CGO_ENABLED=0 GOOS=linux go build -tags sqlite_fts5 -trimpath -ldflags=\"-s -w\" -o /out/world ./cmd/world\nFROM alpine:3.20\nRUN apk add --no-cache ca-certificates tzdata \\\nCOPY --from=gobuild /out/world /usr/local/bin/world\nCOPY --from=web /app/dist /srv\nCOPY --from=web /app/dist-react /srv-react\nENTRYPOINT [\"/usr/local/bin/world\", \"--root=/srv\", \"--react-root=/srv-react\", \"--addr=:3000\"]",
+			"go.mod": "",
+			"package.json": "{\n  \"name\": \"@hanzo/world\",\n  \"description\": \"Hanzo World — real-time global intelligence dashboard.\",\n  \"private\": true,\n  \"version\": \"2.4.51\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"lint:md\": \"markdownlint-cli2 '**/*.md'\",\n    \"dev\": \"vite\",\n    \"dev:react\": \"vite --config vite.react.config.ts\",\n    \"build:react\": \"vite build --config vite.react.config.ts\",\n    \"typecheck:react\": \"tsc -p tsconf",
+			"index.html": "",
+			"e2e/analyst-command.spec.ts": "",
+			"e2e/analyst-full-control.spec.ts": "",
+			"e2e/cloud-admin-fleet.spec.ts": "",
+			"e2e/cloud-mode.spec.ts": "",
+			"e2e/context-menu.spec.ts": "",
+			"e2e/country-view.spec.ts": "",
+			"e2e/dashboard-sync.spec.ts": "",
+			"e2e/enso-real-models.spec.ts": "",
+			"e2e/enso-training-panel.spec.ts": "",
+			"e2e/globe-native.spec.ts": "",
+			"e2e/globe-overlay.spec.ts": "",
+			"e2e/globe-render.spec.ts": "",
+			"e2e/globe.spec.ts": "",
+			"e2e/immersive-screens.spec.ts": "",
+			"e2e/investments-panel.spec.ts": "",
+			"e2e/keyword-spike-flow.spec.ts": "",
+			"e2e/map-harness.spec.ts": "",
+			"e2e/mobile-map-popup.spec.ts": "",
+			"e2e/panel-drag.spec.ts": "",
+			"e2e/runtime-fetch.spec.ts": "",
+			"e2e/stations-wall.spec.ts": "",
+			"e2e/trading-bubble.spec.ts": "",
+			"e2e/ui-polish.spec.ts": "",
+			"e2e/variant-switch-inplace.spec.ts": "",
+			"e2e/video-drag-reset.spec.ts": ""
+		}
+	},
+	"hanzoai/yadota": {
+		"org": "hanzoai",
+		"repo": "yadota",
+		"files": {
+			"Dockerfile": "FROM ghcr.io/hanzoai/static:v0.5.1\nCOPY public/ /public"
+		}
+	},
+	"hanzoai/iam2": {
+		"org": "hanzoai",
+		"repo": "iam2",
+		"files": {
+			"Dockerfile": "FROM golang:1.26.4@sha256:f96cc555eb8db430159a3aa6797cd5bae561945b7b0fe7d0e284c63a3b291609 AS build\nWORKDIR /src\nCOPY go.mod go.sum ./\nRUN --mount=type=secret,id=GIT_AUTH_TOKEN \\\nCOPY . .\nARG GO_EXPERIMENT=jsonv2\nARG VERSION=dev\nRUN CGO_ENABLED=0 go build -trimpath \\\nFROM alpine:latest@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS STANDARD\nRUN apk add --no-cache ca-certificates sqlcipher && update-ca-certificates \\\nWORKDIR /\nCOPY --from=build --chown=hanzo:hanzo /out/iam2 /iam2\nCOPY --from=build --chown=hanzo:hanzo /out/migrate-v1 /migrate-v1\nENTRYPOINT [\"/iam2\"]\nCMD [\"serve\", \"--db\", \"/data/iam2.db\", \"--http\", \"http://:8080\", \"--zap\", \":9653\"]",
+			"go.mod": ""
+		}
+	},
+	"luxfi/node": {
+		"org": "luxfi",
+		"repo": "node",
+		"files": {
+			"Dockerfile": "ARG GO_VERSION=1.26.4\nFROM --platform=$BUILDPLATFORM debian:bookworm-slim AS go-installer\nRUN apt-get update && apt-get install -y --no-install-recommends \\\nARG GO_VERSION\nARG BUILDPLATFORM\nRUN BUILDARCH=$(echo ${BUILDPLATFORM} | cut -d / -f2) && \\\nFROM --platform=$BUILDPLATFORM debian:bookworm-slim AS builder\nCOPY --from=go-installer /usr/local/go /usr/local/go\nRUN apt-get update && apt-get install -y --no-install-recommends \\\nWORKDIR /build\nCOPY go.mod .\nCOPY go.sum .\nRUN --mount=type=secret,id=ghtok,required=false \\\nCOPY . .\nRUN [ -d ./build ] && rm -rf ./build/* || true\nARG TARGETPLATFORM\nARG BUILDPLATFORM\nARG GO_EXPERIMENT=jsonv2\nRUN if [ \"$TARGETPLATFORM\" = \"linux/arm64\" ] && [ \"$BUILDPLATFORM\" != \"linux/arm64\" ]; then \\\nARG ACCEL_VERSION=v0.1.0\nRUN --mount=type=secret,id=ghtok,required=false \\\nARG CGO_ENABLED=1\nARG CEVM_VERSION=v0.51.10\nARG CEVM_REPO=lux-private/cevm\nRUN --mount=type=secret,id=ghtok,required=false \\\nARG RACE_FLAG=\"\"\nARG BUILD_SCRIPT=build.sh\nARG LUXD_COMMIT=\"\"\nRUN . ./build_env.sh && \\\nARG EVM_CGO=0\nARG EVM_TAGS=\"\"\nARG EVM_VERSION=v1.104.9\nARG EVM_VM_ID=mgj786NP7uDwBCcq6YwThhaN8FLyybkCa4zBWTQbNgmK6k9A6\nRUN --mount=type=cache,target=/root/.cache/go-build \\\nARG CHAINS_REF=v1.7.6\nRUN --mount=type=cache,target=/root/.cache/go-build \\\nRUN --mount=type=cache,target=/root/.cache/go-build \\\nARG DEX_REF=v1.5.15\nRUN --mount=type=cache,target=/root/.cache/go-build \\\nRUN --mount=type=cache,target=/root/.cache/go-build \\\nRUN mkdir -p /luxd/build\nFROM debian:12-slim AS execution\nRUN apt-get update && apt-get install -y --no-install-recommends \\\nRUN ldconfig 2>/dev/null || true\nCOPY --from=builder \\\nCOPY --from=builder \\\nCOPY --from=builder \\\nWORKDIR /luxd/build\nCOPY --from=builder /build/build/ .\nRUN mkdir -p /luxd/build/plugins /root/.lpm /root/.lux/plugins\nCMD [ \"./luxd\" ]",
+			"Dockerfile.bootnode": "FROM alpine:3.18\nRUN apk add --no-cache ca-certificates curl bash\nRUN adduser -D -h /home/lux lux\nRUN mkdir -p /luxd/build/plugins /data/plugins /home/lux/.lux/configs\nRUN chown -R lux:lux /luxd /data /home/lux\nCOPY build/luxd-linux-amd64 /luxd/build/luxd\nRUN chmod +x /luxd/build/luxd\nCOPY build/evm-linux-amd64 /luxd/build/plugins/mgj786NP7uDwBCcq6YwThhaN8FLyybkCa4zBWTQbNgmK6k9A6\nRUN chmod +x /luxd/build/plugins/mgj786NP7uDwBCcq6YwThhaN8FLyybkCa4zBWTQbNgmK6k9A6\nRUN ln -s /luxd/build/luxd /usr/local/bin/luxd\nWORKDIR /home/lux\nENTRYPOINT [\"/luxd/build/luxd\"]",
+			"Dockerfile.custom": "ARG GO_VERSION=1.26\nFROM --platform=$BUILDPLATFORM debian:bookworm-slim AS go-installer\nRUN apt-get update && apt-get install -y --no-install-recommends \\\nARG GO_VERSION\nARG BUILDPLATFORM\nRUN BUILDARCH=$(echo ${BUILDPLATFORM} | cut -d / -f2) && \\\nFROM --platform=$BUILDPLATFORM debian:bookworm-slim AS builder\nCOPY --from=go-installer /usr/local/go /usr/local/go\nRUN apt-get update && apt-get install -y --no-install-recommends \\\nWORKDIR /build\nCOPY go.mod .\nCOPY go.sum .\nRUN go mod download\nCOPY . .\nRUN [ -d ./build ] && rm -rf ./build/* || true\nRUN export GOARCH=amd64 && ./scripts/build.sh\nARG EVM_VM_ID=mgj786NP7uDwBCcq6YwThhaN8FLyybkCa4zBWTQbNgmK6k9A6\nRUN mkdir -p /luxd/build/plugins\nCOPY evm-plugin-linux-amd64 /luxd/build/plugins/${EVM_VM_ID}\nRUN chmod +x /luxd/build/plugins/${EVM_VM_ID}\nRUN mkdir -p /luxd/build\nFROM debian:12-slim AS execution\nCOPY --from=builder /luxd/build /luxd/build\nWORKDIR /luxd/build\nCOPY --from=builder /build/build/ .\nRUN mkdir -p /luxd/build/plugins\nCMD [ \"./luxd\" ]",
+			"docker/Dockerfile.local": "FROM golang:1.26.3-alpine AS builder\nRUN apk add --no-cache git make gcc musl-dev linux-headers bash\nWORKDIR /build\nCOPY go.mod go.sum ./\nRUN go mod download\nCOPY . .\nRUN CGO_ENABLED=0 ./scripts/build.sh -- -tags purego\nFROM alpine:latest\nRUN apk add --no-cache ca-certificates curl bash\nRUN mkdir -p /luxd/build/plugins /var/lib/lux /data\nCOPY --from=builder /build/build/luxd /luxd/build/luxd\nRUN adduser -D -h /var/lib/lux lux && chown -R lux:lux /var/lib/lux /luxd /data\nENTRYPOINT [\"/luxd/build/luxd\"]",
+			"docker/Dockerfile.multichain": "FROM golang:1.26.3-alpine AS builder\nARG CHAIN_TYPE=platform\nRUN apk add --no-cache git make gcc musl-dev linux-headers\nWORKDIR /build\nCOPY . .\nRUN if [ \"$CHAIN_TYPE\" = \"platform\" ]; then \\\nFROM alpine:3.18\nRUN apk add --no-cache ca-certificates bash\nWORKDIR /app\nCOPY --from=builder /build/luxd* /usr/local/bin/luxd\nRUN mkdir -p /data\nCOPY --from=builder /build/configs /configs\nENTRYPOINT [\"/usr/local/bin/luxd\"]",
+			"docker/Dockerfile.prebuilt": "FROM --platform=linux/arm64 debian:11-slim\nRUN apt-get update && apt-get install -y \\\nRUN mkdir -p /data\nCOPY node/build/luxd /usr/local/bin/luxd\nRUN chmod +x /usr/local/bin/luxd\nCMD [\"luxd\", \"--network-id=local\", \"--http-host=0.0.0.0\", \"--http-port=9630\", \"--staking-port=9631\", \"--db-dir=/data\", \"--log-level=info\"]",
+			"docker/Dockerfile.simple": "FROM golang:1.26.3-alpine AS builder\nRUN apk add --no-cache git make gcc musl-dev linux-headers bash\nWORKDIR /build\nCOPY . .\nRUN ./scripts/build.sh\nFROM alpine:latest\nRUN apk add --no-cache ca-certificates\nCOPY --from=builder /build/build/luxd /usr/local/bin/luxd\nRUN adduser -D -h /app luxd\nWORKDIR /app\nENTRYPOINT [\"/usr/local/bin/luxd\"]",
+			"go.mod": ""
+		}
+	},
+	"luxfi/exchange": {
+		"org": "luxfi",
+		"repo": "exchange",
+		"files": {
+			"Dockerfile": "FROM node:22-alpine AS deps\nRUN apk add --no-cache libc6-compat python3 make g++ git\nWORKDIR /app\nRUN corepack enable && corepack prepare pnpm@9.15.9 --activate\nCOPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./\nCOPY apps/web/package.json apps/web/\nCOPY apps/mobile/package.json apps/mobile/\nCOPY pkgs/api/package.json pkgs/api/\nCOPY pkgs/lx/package.json pkgs/lx/\nCOPY pkgs/ui/package.json pkgs/ui/\nCOPY pkgs/wallet/package.json pkgs/wallet/\nCOPY pkgs/utilities/package.json pkgs/utilities/\nCOPY pkgs/config/package.json pkgs/config/\nCOPY pkgs/sessions/package.json pkgs/sessions/\nCOPY pkgs/gating/package.json pkgs/gating/\nCOPY pkgs/notifications/package.json pkgs/notifications/\nCOPY pkgs/prices/package.json pkgs/prices/\nCOPY pkgs/exchange/package.json pkgs/exchange/\nCOPY pkgs/dex/package.json pkgs/dex/\nCOPY pkgs/websocket/package.json pkgs/websocket/\nCOPY pkgs/logger/package.json pkgs/logger/\nCOPY pkgs/privacy/package.json pkgs/privacy/\nCOPY pkgs/analytics/package.json pkgs/analytics/\nCOPY pkgs/biome-config/package.json pkgs/biome-config/\nCOPY pkgs/eslint-config/package.json pkgs/eslint-config/\nCOPY pkgs/react-query/package.json pkgs/react-query/\nCOPY pkgs/trpc/package.json pkgs/trpc/\nCOPY pkgs/mycelium/package.json pkgs/mycelium/\nCOPY pkgs/hashcash-native/package.json pkgs/hashcash-native/\nCOPY pkgs/options/package.json pkgs/options/\nCOPY config/vitest-presets/package.json config/vitest-presets/\nCOPY config/jest-presets/package.json config/jest-presets/\nCOPY config/tsconfig/package.json config/tsconfig/\nRUN NODE_ENV=development pnpm install --no-frozen-lockfile --ignore-scripts\nFROM deps AS builder\nWORKDIR /app\nCOPY . .\nRUN pnpm rebuild || true\nRUN cd pkgs/biome-config && node scripts/generate.js || true\nRUN cd pkgs/api && pnpm exec openapi \\\nRUN mkdir -p pkgs/lx/src/abis/types/v3 && echo 'export {}' > pkgs/lx/src/abis/types/v3/index.ts\nRUN cd apps/web && pnpm exec node scripts/compile-ajv-validators.js || true\nRUN cd apps/web && DISABLE_EXTRACTION=1 NODE_OPTIONS=\"--max-old-space-size=8192\" pnpm exec vite build\nFROM ghcr.io/hanzoai/spa\nCOPY --from=builder /app/apps/web/build /public",
+			"Dockerfile.api": "FROM node:22-alpine\nWORKDIR /app\nRUN npm install express cors ethers helmet express-rate-limit\nCOPY server.js .\nRUN addgroup -g 1001 -S nodejs && \\\nCMD [\"node\", \"server.js\"]",
+			"Dockerfile.k8s": "FROM node:22-alpine AS builder\nRUN apk add --no-cache libc6-compat python3 make g++\nWORKDIR /app\nRUN corepack enable && corepack prepare pnpm@9.15.9 --activate\nCOPY . .\nRUN NODE_ENV=development pnpm install --no-frozen-lockfile --ignore-scripts\nARG REACT_APP_INSIGHTS_API_KEY\nARG REACT_APP_INSIGHTS_HOST=https://insights.hanzo.ai\nRUN NODE_PATH=/app/node_modules node apps/web/scripts/compile-ajv-validators.js\nRUN cd apps/web && DISABLE_EXTRACTION=1 NODE_OPTIONS=\"--max-old-space-size=16384\" pnpm exec vite build\nFROM node:22-alpine AS runner\nRUN npm install -g serve@14\nRUN addgroup -g 1001 -S app && adduser -S app -u 1001\nWORKDIR /app\nCOPY --from=builder /app/apps/web/build /app/public\nCOPY docker/entrypoint.sh /app/entrypoint.sh\nRUN chown -R app:app /app\nENTRYPOINT [\"/app/entrypoint.sh\"]\nCMD [\"serve\", \"-s\", \"public\", \"-l\", \"3000\"]",
+			"package.json": "{\n  \"name\": \"lux-exchange\",\n  \"version\": \"0.0.0\",\n  \"devDependencies\": {\n    \"@actions/core\": \"1.10.1\",\n    \"@biomejs/biome\": \"2.2.0\",\n    \"@commitlint/cli\": \"17.5.0\",\n    \"@commitlint/config-conventional\": \"17.4.4\",\n    \"@crowdin/cli\": \"3.14.0\",\n    \"@ethersproject/keccak256\": \"5.7.0\",\n    \"@manypkg/cli\": \"0.19.2\",\n    \"@nx/devkit\": \"22.5.4\",\n    \"@nx/jest\": \"22.5.4\",\n    \"@nx/js\": \"22.5.4\",\n    ",
+			"foundry.toml": ""
+		}
+	},
+	"luxfi/consensus": {
+		"org": "luxfi",
+		"repo": "consensus",
+		"files": {
+			"go.mod": ""
+		}
+	},
+	"zooai/explorer": {
+		"org": "zooai",
+		"repo": "explorer",
+		"files": {
+			"docker/Dockerfile": "FROM hexpm/elixir:1.17.3-erlang-27.1-alpine-3.20.3 AS builder\nWORKDIR /app\nRUN apk --no-cache --update add alpine-sdk gmp-dev automake libtool inotify-tools autoconf python3 file gcompat\nRUN set -ex && \\\nARG CACHE_EXCHANGE_RATES_PERIOD\nARG API_V1_READ_METHODS_DISABLED\nARG DISABLE_WEBAPP\nARG API_V1_WRITE_METHODS_DISABLED\nARG CACHE_TOTAL_GAS_USAGE_COUNTER_ENABLED\nARG ADMIN_PANEL_ENABLED\nARG CACHE_ADDRESS_WITH_BALANCES_UPDATE_INTERVAL\nARG SESSION_COOKIE_DOMAIN\nARG MIXPANEL_TOKEN\nARG MIXPANEL_URL\nARG AMPLITUDE_API_KEY\nARG AMPLITUDE_URL\nARG CHAIN_TYPE\nARG BRIDGED_TOKENS_ENABLED\nARG MUD_INDEXER_ENABLED\nARG SHRINK_INTERNAL_TRANSACTIONS_ENABLED\nARG API_GRAPHQL_MAX_COMPLEXITY\nRUN mix local.hex --force\nRUN mix do deps.get, local.rebar --force, deps.compile\nRUN mix compile\nRUN apk add --update git make \nRUN mkdir -p /opt/release \\\nFROM hexpm/elixir:1.17.3-erlang-27.1-alpine-3.20.3\nARG RELEASE_VERSION\nARG CHAIN_TYPE\nARG BRIDGED_TOKENS_ENABLED\nARG SHRINK_INTERNAL_TRANSACTIONS_ENABLED\nARG BLOCKSCOUT_VERSION\nARG BLOCKSCOUT_USER=blockscout\nARG BLOCKSCOUT_GROUP=blockscout\nARG BLOCKSCOUT_UID=10001\nARG BLOCKSCOUT_GID=10001\nRUN apk --no-cache --update add jq curl && \\\nWORKDIR /app\nCOPY --from=builder --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /opt/release/blockscout .\nCOPY --from=builder --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /app/config/config_helper.exs ./config/config_helper.exs\nCOPY --from=builder --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /app/config/config_helper.exs /app/releases/${RELEASE_VERSION}/config_helper.exs\nCOPY --from=builder --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /app/config/assets/precompiles-arbitrum.json ./config/assets/precompiles-arbitrum.json\nRUN chown -R ${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /app"
+		}
+	}
+}
