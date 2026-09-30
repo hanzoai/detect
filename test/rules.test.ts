@@ -187,11 +187,11 @@ test("detect is a pure function — same tree, identical output", () => {
 // --- cluster pass -----------------------------------------------------------
 
 const INDEX: ClusterIndex = [
-	{ cluster: "do-sfo3-hanzo-k8s", namespace: "hanzo", kind: "App", name: "hanzo-app", imageRepo: "ghcr.io/hanzoai/hanzo-app" },
-	{ cluster: "do-sfo3-hanzo-k8s", namespace: "hanzo", kind: "App", name: "commerce-admin", imageRepo: "ghcr.io/hanzoai/commerce-admin" },
-	{ cluster: "do-sfo3-hanzo-k8s", namespace: "hanzo-devnet", kind: "App", name: "commerce", imageRepo: "ghcr.io/hanzoai/commerce" },
-	{ cluster: "do-sfo3-hanzo-k8s", namespace: "hanzo", kind: "App", name: "world", imageRepo: "ghcr.io/hanzoai/world" },
-	{ cluster: "do-sfo3-lux-k8s", namespace: "lux-ns", kind: "Deployment", name: "lux-exchange", imageRepo: "ghcr.io/luxfi/exchange" },
+	{ cluster: "cluster-a", namespace: "hanzo", kind: "App", name: "hanzo-app", imageRepo: "ghcr.io/hanzoai/hanzo-app" },
+	{ cluster: "cluster-a", namespace: "hanzo", kind: "App", name: "commerce-admin", imageRepo: "ghcr.io/hanzoai/commerce-admin" },
+	{ cluster: "cluster-a", namespace: "hanzo-devnet", kind: "App", name: "commerce", imageRepo: "ghcr.io/hanzoai/commerce" },
+	{ cluster: "cluster-a", namespace: "hanzo", kind: "App", name: "world", imageRepo: "ghcr.io/hanzoai/world" },
+	{ cluster: "cluster-b", namespace: "lux-ns", kind: "Deployment", name: "lux-exchange", imageRepo: "ghcr.io/luxfi/exchange" },
 ];
 
 test("imageAliases offers the brand-prefixed form once", () => {
@@ -210,7 +210,7 @@ test("cluster pass renames an image the repo name alone gets wrong", () => {
 	assert.equal(r.config.builds[0]?.name, "hanzo-app");
 	assert.equal(r.config.builds[0]?.tagPattern, "{{git.sha}}-amd64-hanzo-app");
 	assert.deepEqual(r.config.deploy?.target, {
-		cluster: "do-sfo3-hanzo-k8s", namespace: "hanzo",
+		cluster: "cluster-a", namespace: "hanzo",
 		operator: "hanzo-operator", crd: "App", name: "hanzo-app",
 	});
 	assert.deepEqual(r.config.deploy?.on, ["main"]);

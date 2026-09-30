@@ -14,7 +14,7 @@ import { detect, withCluster, fsTree } from "@hanzo/detect";
 const ctx = { org: "hanzoai", repo: "world" };
 const result = withCluster(detect(fsTree("/path/to/world"), ctx), clusterIndex, ctx);
 // result.config.builds[0].image  → "ghcr.io/hanzoai/world"
-// result.config.deploy.target    → App hanzo/world on do-sfo3-hanzo-k8s
+// result.config.deploy.target    → App hanzo/world on cluster-a
 ```
 
 ## Two passes
@@ -123,9 +123,11 @@ npm run typecheck     # strict, noUncheckedIndexedAccess
 npm run typecheck:seam # our PlatformConfig ↔ platform's, both directions
 ```
 
-`test/fixtures/` holds a real snapshot of 17 fleet repos and the live operator-CR
-index, so the fleet tests are hermetic but not synthetic. Regenerate with
-`bin/snapshot-trees.ts` and `bin/cluster-index.ts`; the diff is the review.
+`test/fixtures/trees.json` is a real snapshot of 17 fleet repos (regenerate with
+`bin/snapshot-trees.ts`; the diff is the review). `test/fixtures/cluster-index.json`
+is a synthetic operator-CR index in the shape `bin/cluster-index.ts` emits,
+holding only the workloads those trees join against plus the decoys the ranking
+must reject.
 
 ## Tools
 

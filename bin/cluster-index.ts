@@ -7,7 +7,7 @@
  * indexed too but only as evidence that an image ref exists — `resolveDeploy`
  * refuses to target them, because the operator does not own them.
  *
- *   node bin/cluster-index.ts do-sfo3-hanzo-k8s do-sfo3-lux-k8s > index.json
+ *   node bin/cluster-index.ts cluster-a cluster-b > index.json
  */
 import { execFileSync } from "node:child_process";
 import type { WorkloadRef } from "../src/deploy.ts";
